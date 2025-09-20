@@ -4,63 +4,37 @@ import datetime
 import csv
 import cv2
 import json
-import sys
-import tempfile
-from io import BytesIO
-
-# Add the dashboard directory to Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-dashboard_dir = os.path.join(current_dir, '..')
-sys.path.insert(0, os.path.abspath(dashboard_dir))
-
-from dashboard.app import file
-
-# # Add the dashboard directory to Python path
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# dashboard_dir = os.path.join(current_dir, '..')
-# sys.path.insert(0, os.path.abspath(dashboard_dir))
-
-# from src.metadata import log_metadata_from_streamlit
 
 CSV_FILE = "audit_log.csv"
 
-# sha256 
-def compute_sha256_from_bytes(file_bytes):
+# sha256
+def compute_sha256_from_file(file_path):
     sha256 = hashlib.sha256()
-    sha256.update(file_bytes)
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
     return sha256.hexdigest()
 
-# Extract video metadata from file bytes
-def extract_video_metadata_from_bytes(file_bytes, original_filename):
+# Extract video metadata from file path
+def extract_video_metadata_from_path(file_path):
     metadata = {}
-    
-    # Create a temporary file to work with OpenCV
-    with tempfile.NamedTemporaryFile(suffix=os.path.splitext(original_filename)[1], delete=False) as temp_file:
-        temp_file.write(file_bytes)
-        temp_file_path = temp_file.name
-    
     try:
-        # Use the temporary file path with OpenCV
-        cap = cv2.VideoCapture(temp_file_path)
+        cap = cv2.VideoCapture(file_path)
 
-        # Frame count and FPS
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
 
         metadata["frame_count"] = frame_count
         metadata["fps"] = fps if fps > 0 else None
 
-        # Duration from OpenCV
         if fps > 0:
             duration_sec = frame_count / fps
             metadata["duration_sec"] = round(duration_sec, 3)
-            # Human-readable format HH:MM:SS
             metadata["duration_hms"] = str(datetime.timedelta(seconds=int(duration_sec)))
         else:
             metadata["duration_sec"] = None
             metadata["duration_hms"] = None
 
-        # Resolution
         metadata["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         metadata["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -68,24 +42,20 @@ def extract_video_metadata_from_bytes(file_bytes, original_filename):
 
     except Exception as e:
         metadata["error"] = str(e)
-    finally:
-        # Clean up temporary file
-        os.unlink(temp_file_path)
 
-    # File-system-level info (current time for ingest)
-    metadata["file_size_bytes"] = len(file_bytes)
-    metadata["created_time"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    metadata["modified_time"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # File-system info
+    stat_info = os.stat(file_path)
+    metadata["file_size_bytes"] = stat_info.st_size
+    metadata["created_time"] = datetime.datetime.fromtimestamp(stat_info.st_ctime, datetime.timezone.utc).isoformat()
+    metadata["modified_time"] = datetime.datetime.fromtimestamp(stat_info.st_mtime, datetime.timezone.utc).isoformat()
 
     return metadata
 
-# Log evidence from Streamlit uploaded file object
-def log_evidence_from_streamlit(uploaded_file, camera_id="unknown", action="ingest"):
-    # Read the file bytes
-    file_bytes = uploaded_file.read()
-    filename = uploaded_file.name
-    sha256 = compute_sha256_from_bytes(file_bytes)
-    metadata = extract_video_metadata_from_bytes(file_bytes, filename)
+# Log evidence from file path
+def log_evidence_from_path(file_path, camera_id="unknown", action="ingest"):
+    filename = os.path.basename(file_path)
+    sha256 = compute_sha256_from_file(file_path)
+    metadata = extract_video_metadata_from_path(file_path)
     ingest_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     row = [
@@ -105,10 +75,10 @@ def log_evidence_from_streamlit(uploaded_file, camera_id="unknown", action="inge
         writer.writerow(row)
 
     return sha256, metadata
- 
-def verify_file_from_bytes(file_bytes):
-    """Return True if computed SHA256 exists in the CSV audit log from file bytes"""
-    current_hash = compute_sha256_from_bytes(file_bytes)
+
+# Verify by path
+def verify_file_from_path(file_path):
+    current_hash = compute_sha256_from_file(file_path)
     if not os.path.isfile(CSV_FILE):
         return False
     with open(CSV_FILE, "r", encoding="utf-8") as f:
