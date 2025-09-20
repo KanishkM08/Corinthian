@@ -8,11 +8,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.join(current_dir, '..', 'src')
 sys.path.insert(0, os.path.abspath(src_dir))
 
-# Import AI person detection runner (to be implemented in ai_detection.py)
-# Expected signature:
-#   run_ai_detection(input_video: str, output_dir: str, references: dict, yolo_weights: str, conf: float) 
-#   -> dict with keys: {"output_video": str, "report_path": str, "detections": dict}
-from ai_detection import run_ai_detection  # make sure function exists in ai_detection.py
 
 # Add the dashboard directory to Python path
 dashboard_dir = os.path.join(current_dir, '..')
@@ -135,7 +130,12 @@ if caseid and iname:
         # "Person_A": [r"C:\path\to\person_a_1.jpg", r"C:\path\to\person_a_2.jpg"],
         # "Person_B": [r"C:\path\to\person_b.jpg"],
     }
-
+    
+    # Import AI person detection runner (to be implemented in ai_detection.py)
+    # Expected signature:
+    #   run_ai_detection(input_video: str, output_dir: str, references: dict, yolo_weights: str, conf: float) 
+    #   -> dict with keys: {"output_video": str, "report_path": str, "detections": dict}
+    from ai_detection import run_ai_detection  # make sure function exists in ai_detection.py
     # Process button - only enabled if both file and output folder are selected
     if st.session_state.selected_file and st.session_state.output_folder:
         if st.button("Process File"):
