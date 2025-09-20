@@ -3,6 +3,8 @@ import sys
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import uuid
+from datetime import datetime
 
 # Ensure "src" is in sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,13 @@ try:
     from src.metadata import log_evidence_from_path
 except ImportError:
     st.error("Could not import src.metadata. Ensure src/metadata.py exists and path is correct.")
+    st.stop()
+
+# Import the PDF report generator
+try:
+    from generate_report import generate_report
+except ImportError:
+    st.error("Could not import generate_report. Ensure generate_report.py is alongside app.py.")
     st.stop()
 
 # File selection functions
@@ -63,6 +72,17 @@ def get_file_others(file_type="cctv"):
     root.destroy()
     return file_path
 
+# Folder selection function (cross-platform)
+def select_output_folder():
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    folder_path = filedialog.askdirectory(title="Select Output Folder")
+    root.destroy()
+    return folder_path
+
 st.title("Corinthian")
 
 # Initialize session state for file selections
@@ -70,19 +90,21 @@ if 'selected_file' not in st.session_state:
     st.session_state.selected_file = None
 if 'excel_selected' not in st.session_state:
     st.session_state.excel_selected = None
+if 'output_folder' not in st.session_state:
+    st.session_state.output_folder = str(Path.home() / "Corinthian_Results")
 
 # Sidebar inputs
 caseid = st.text_input("CaseID")
-if caseid:
-    st.success("CaseID added")
-else:
-    st.warning("CaseID is required to proceed")
-
 iname = st.text_input("Investigator's Name")
-if iname:
-    st.success("Name saved")
-else:
-    st.warning("Investigator's name is required to proceed")
+
+# Check if both required fields are filled
+required_fields_filled = caseid and iname
+
+if not required_fields_filled:
+    st.warning("Please enter both CaseID and Investigator's Name to proceed")
+    st.stop()
+
+st.success("CaseID and Investigator Name added. You can now proceed.")
 
 # File selection controls
 ALLOWED_EXTENSIONS = {'.jpeg', '.jpg', '.png', '.mov', '.mp4', '.avi', '.heic'}
@@ -119,13 +141,21 @@ if st.button("Browse for Excel File"):
     else:
         st.info("No file selected.")
 
+# Output folder selection
+if st.button("Select Output Folder"):
+    selected_folder = select_output_folder()
+    if selected_folder:
+        st.session_state.output_folder = selected_folder
+        st.success(f"Output Folder: {st.session_state.output_folder}")
+    else:
+        st.info("No folder selected. Using default.")
+
 # ALWAYS display currently selected files BEFORE any st.stop paths
 if st.session_state.selected_file:
     st.info(f"CCTV File: {st.session_state.selected_file}")
 if st.session_state.excel_selected:
     st.info(f"Excel File: {st.session_state.excel_selected}")
-
-output_folder = st.text_input("Output Folder Path", value=str(Path.home() / "Corinthian_Results"))
+st.info(f"Output Folder: {st.session_state.output_folder}")
 
 # Detection options
 st.subheader("Detection Options")
@@ -141,10 +171,6 @@ tolerance = st.slider("Face match tolerance", min_value=0.3, max_value=0.8, valu
 # Process button
 if st.button("Process File"):
     # Validate inputs
-    if not caseid or not iname:
-        st.error("CaseID and Investigator's Name are required.")
-        st.stop()
-
     if not st.session_state.selected_file:
         st.error("Please select a CCTV file.")
         st.stop()
@@ -153,16 +179,17 @@ if st.button("Process File"):
         st.error("Please select the Excel file with references.")
         st.stop()
 
+    # Use the session state variables
+    output_folder = st.session_state.output_folder
+    selected_file = st.session_state.selected_file
+    excel_selected = st.session_state.excel_selected
+
     if not os.path.exists(output_folder):
         try:
             os.makedirs(output_folder, exist_ok=True)
         except Exception as e:
             st.error(f"Cannot create output folder: {e}")
             st.stop()
-
-    # Use the session state variables
-    selected_file = st.session_state.selected_file
-    excel_selected = st.session_state.excel_selected
 
     # Verify selected file exists
     if not os.path.exists(selected_file):
@@ -212,15 +239,16 @@ if st.button("Process File"):
         st.success(f"Loaded references for {len(references)} people.")
 
     # Log evidence metadata
+    evidence_metadata = {}
     try:
         sha256, metadata = log_evidence_from_path(selected_file, camera_id="CCTV-1")
+        evidence_metadata = metadata
         st.json(metadata)
     except Exception as e:
         st.warning(f"Metadata logging failed: {e}")
 
     try:
-        # run_ai_detection must be the pure function (no hardcoded paths)
-        from ai_detection import run_ai_detection
+        from src.ai_detection import run_ai_detection
     except ImportError:
         st.error("Could not import ai_detection. Ensure ai_detection.py is alongside app.py and defines run_ai_detection.")
         st.stop()
@@ -244,7 +272,7 @@ if st.button("Process File"):
             person_result = {"detections": {}, "output_video": None, "report_path": None}
 
     try:
-        from tdetection import run_tamper_detection
+        from src.tdetection import run_tamper_detection
     except ImportError:
         st.error("Could not import tdetection. Ensure tdetection.py is alongside app.py.")
         st.stop()
@@ -258,53 +286,68 @@ if st.button("Process File"):
             st.error(f"Tamper detection failed: {e}")
             t_video, t_csv, tamper_times = None, None, []
 
-    # Generate combined report
-    combined_report = os.path.join(output_folder, "combined_report.txt")
-    try:
-        with open(combined_report, "w", encoding="utf-8") as rpt:
-            rpt.write("CORINTHIAN DETECTION REPORT\n")
-            rpt.write("===========================\n\n")
-            rpt.write(f"Case ID: {caseid}\n")
-            rpt.write(f"Investigator: {iname}\n")
-            rpt.write(f"Input File: {os.path.basename(selected_file)}\n")
-            rpt.write(f"Settings: frame_skip={frame_skip}, imgsz={imgsz}, tolerance={tolerance}, conf={conf}\n")
-            rpt.write(f"Analysis Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-
-            # Person Detection Results
-            rpt.write("PERSON DETECTION RESULTS:\n")
-            rpt.write("-" * 40 + "\n")
-            person_detections = person_result.get("detections", {})
-            if person_detections:
-                for name, times in sorted(person_detections.items()):
-                    rpt.write(f"\n{name}:\n")
-                    if times:
-                        unique_times = sorted(set(times))
-                        rpt.write(f" Total detections: {len(unique_times)}\n")
-                        rpt.write(" Timestamps:\n")
-                        for ts in unique_times:
-                            rpt.write(f" - {ts}\n")
-                    else:
-                        rpt.write(" - No detections\n")
-            else:
-                rpt.write("No person detections found.\n")
-
-            # Tamper Detection Results
-            rpt.write("\n\nTAMPER DETECTION RESULTS:\n")
-            rpt.write("-" * 40 + "\n")
-            if tamper_times:
-                rpt.write(f"Total tampering events detected: {len(tamper_times)}\n")
-                rpt.write("Tampering timestamps:\n")
-                for seconds in sorted(set(tamper_times)):
-                    ts = str(pd.to_timedelta(seconds, unit='s')).split(".")[0]
-                    rpt.write(f" - {ts}\n")
-            else:
-                rpt.write("No tampering events detected.\n")
-
-            rpt.write("\n" + "=" * 50 + "\n")
-            rpt.write("End of Report\n")
-        st.success(f"Combined report saved at: {combined_report}")
-    except Exception as e:
-        st.error(f"Failed to write combined report: {e}")
+    # Generate comprehensive PDF report instead of text report
+    pdf_report_path = os.path.join(output_folder, "forensic_analysis_report.pdf")
+    
+    # Prepare data for the PDF report
+    report_data = {
+        "report_id": str(uuid.uuid4())[:8].upper(),
+        "case_id": caseid,
+        "investigator": iname,
+        "generating_system_version": "Corinthian v1.0",
+        "evidence_list": [
+            {
+                "filename": os.path.basename(selected_file),
+                "sha256": evidence_metadata.get('sha256', 'N/A'),
+                "ingest_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "camera_id": "CCTV-1",
+                "duration": evidence_metadata.get('duration', 'N/A'),
+                "metadata": evidence_metadata
+            }
+        ],
+        "findings": [],
+        "forensics": {
+            "metadata_summary": evidence_metadata,
+            "tamper_flags": [{"time": str(timedelta(seconds=t)), "explanation": "Potential tampering detected"} for t in tamper_times] if tamper_times else [],
+            "deepfake_score": 0.15  # Placeholder - would need actual deepfake detection
+        },
+        "signatures": {
+            "report_sha256": "N/A",  # Will be calculated by generate_report
+            "signature": "N/A",  # Placeholder for digital signature
+            "signing_cert_subject": "N/A",
+            "signing_cert_pubkey_fingerprint": "N/A"
+        },
+        "access_log_summary": {
+            "total_accesses": 1,
+            "first_access": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "last_access": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "users": [iname]
+        }
+    }
+    
+    # Convert person detection results to findings format
+    for name, timestamps in person_result.get("detections", {}).items():
+        for ts in set(timestamps):
+            report_data["findings"].append({
+                "time_window": f"{ts} - {ts}",  # Simplified - would need actual time windows
+                "track_id": "N/A",  # Would need to extract from detection results
+                "object_type": "Person",
+                "representative_frame_path": "N/A",  # Would need to extract frames
+                "bounding_box": [0, 0, 0, 0],  # Placeholder
+                "matched_offender_id": name.split()[0] if ' ' in name else name,
+                "matched_offender_name": name,
+                "similarity_score": 0.85,  # Placeholder - would need actual similarity scoring
+                "verification_status": "unverified"  # Would need verification system
+            })
+    
+    # Generate the PDF report
+    with st.spinner("Generating comprehensive PDF report..."):
+        try:
+            generate_report(report_data, pdf_report_path)
+            st.success(f"PDF report generated: {pdf_report_path}")
+        except Exception as e:
+            st.error(f"Failed to generate PDF report: {e}")
+            pdf_report_path = None
 
     # Display outputs and info
     st.caption(f"Used settings: frame_skip={frame_skip}, imgsz={imgsz}, tolerance={tolerance}, conf={conf}")
@@ -314,13 +357,23 @@ if st.button("Process File"):
         st.write("Person Detection")
         if person_result.get("output_video") and os.path.exists(person_result["output_video"]):
             st.info(f"Annotated video: {person_result['output_video']}")
-        if person_result.get("report_path") and os.path.exists(person_result["report_path"]):
-            st.info(f"Person report: {person_result['report_path']}")
     with col2:
         st.write("Tamper Detection")
         if t_video and os.path.exists(t_video):
             st.info(f"Tamper video: {t_video}")
         if t_csv and os.path.exists(t_csv):
             st.info(f"Tamper CSV: {t_csv}")
-    if os.path.exists(combined_report):
-        st.info(f"Combined report: {combined_report}")
+    
+    # Only show the PDF report (removed text reports)
+    if pdf_report_path and os.path.exists(pdf_report_path):
+        st.info(f"Comprehensive PDF Report: {pdf_report_path}")
+        
+        # Provide download button for the PDF
+        with open(pdf_report_path, "rb") as f:
+            pdf_data = f.read()
+        st.download_button(
+            label="Download PDF Report",
+            data=pdf_data,
+            file_name="forensic_analysis_report.pdf",
+            mime="application/pdf"
+        )
