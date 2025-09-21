@@ -82,19 +82,23 @@ This will create a folder named venv inside your project.
 
 6. Activate the virtual environment
 Run:
-    source venv/bin/activate
+    ```source venv/bin/activate```
 
 You’ll see (venv) in your terminal prompt.
 Check again:
-python --version
+```python --version```
 
 It should still show 3.11.9
 
 Upgrade pip before installing (important for newer packages):
-    pip install --upgrade pip setuptools wheel
+    ```pip install --upgrade pip setuptools wheel```
 
 Install from requirements.txt:
-    pip install -r requirements.txt
+    ```pip install -r requirements.txt```
+
+for safety, deactive venv by running: ```deactivate```
+and restart the terminal
+start the venv again by ```source venv/bin/activate```
 
 🔹 Potential Issues to Watch Out For
 Some of the packages in your list are heavy and sometimes tricky with Mac + Python 3.11:
@@ -155,7 +159,7 @@ Create a venv named venv
     py -3.11 -m venv venv
 
 Activate it
-    venv\scripts\activate     # CMD
+    ```venv\scripts\activate```     # CMD
 
 
 ⁠Confirm Your Virtual Environment’s Python Version
@@ -163,12 +167,11 @@ With the venv activated, run:
     python --version
 
 You should see:
-    Python 3.11.9
+    ```Python 3.11.9```
 
 Inside your venv 
     pip install --upgrade pip setuptools wheel
     pip install -r requirements.txt
-
 
 
 
