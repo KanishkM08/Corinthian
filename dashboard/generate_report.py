@@ -133,7 +133,7 @@ def generate_report(report_data: dict, output_path: str):
         ["Investigator:", report_data.get('investigator', 'N/A')]
     ]
     
-    # Use smaller column widths to fit properly
+    # Use smaller column widths
     report_meta_table = Table(report_meta_data, colWidths=[1.8*inch, 3.2*inch])
     report_meta_table.setStyle(TableStyle([
         ('FONT', (0, 0), (-1, -1), 'Helvetica'),
@@ -154,7 +154,7 @@ def generate_report(report_data: dict, output_path: str):
             story.append(Spacer(1, 6))
             story.append(safe_paragraph(f"Evidence Item {idx}:", bold_style))
             
-            # Create evidence details as a table for better formatting
+            # Create evidence details as a table
             evidence_data = [
                 ["Filename:", str(evidence.get('filename', 'N/A'))],
                 ["SHA256:", str(evidence.get('sha256', 'N/A'))],
@@ -288,7 +288,6 @@ def generate_report(report_data: dict, output_path: str):
     #     story.append(safe_paragraph("Deepfake analysis not performed", normal_style))
     # story.append(Spacer(1, 12))
 
-    # --- STEP 2: Build preliminary PDF to compute hash ---
     # Create a temporary story for hash calculation (without signatures)
     temp_story = story.copy()
     temp_story.append(safe_paragraph("End of Report", heading_style))
@@ -306,7 +305,7 @@ def generate_report(report_data: dict, output_path: str):
     temp_pdf_bytes = temp_buffer.getvalue()
     report_hash = hashlib.sha256(temp_pdf_bytes).hexdigest()
 
-    # --- STEP 3: Generate digital signatures ---
+    # Generate digital signatures
     if 'signatures' not in report_data:
         report_data['signatures'] = {}
     report_data['signatures']['report_sha256'] = report_hash
@@ -341,7 +340,7 @@ def generate_report(report_data: dict, output_path: str):
         report_data['signatures'].setdefault('signing_cert_subject', 'N/A')
         report_data['signatures'].setdefault('signing_cert_pubkey_fingerprint', 'N/A')
 
-    # --- STEP 4: Add digital signatures and access log to story ---
+    # Add digital signatures and access log to story
     story.append(safe_paragraph("Digital Signatures", heading_style))
     signatures = report_data['signatures']
     
@@ -402,7 +401,7 @@ def generate_report(report_data: dict, output_path: str):
 
     story.append(safe_paragraph("End of Report", heading_style))
 
-    # --- STEP 5: Build final complete PDF ---
+    # Build final complete PDF
     final_buffer = io.BytesIO()
     final_doc = SimpleDocTemplate(
         final_buffer, 
@@ -414,7 +413,7 @@ def generate_report(report_data: dict, output_path: str):
     )
     final_doc.build(story)
     
-    # --- STEP 6: Save to file ---
+    # Save to file
     with open(output_path, "wb") as f:
         f.write(final_buffer.getvalue())
 
