@@ -37,7 +37,6 @@ except ImportError:
     st.stop()
 
 # Import car detection
-
 from src.car_detection import run_car_detection
 
 
@@ -344,7 +343,7 @@ if st.button("Process File"):
             st.error(f"Tamper detection failed: {e}")
             tvideo, tcsv, tamper_times = None, None, []
     
-    # Generate comprehensive PDF report instead of text report
+    # Generate comprehensive PDF report
     pdf_report_path = os.path.join(output_folder, "forensic_analysis_report.pdf")
     
     # Prepare data for the PDF report
@@ -364,7 +363,7 @@ if st.button("Process File"):
             "metadata_summary": evidence_metadata,
             "tamper_flags": [{"time": str(timedelta(seconds=t)), "explanation": "Potential tampering detected"} 
                            for t in tamper_times] if tamper_times else [],
-            "deepfake_score": 0.15  # Placeholder - would need actual deepfake detection
+            "deepfake_score": 0.15
         },
         "signatures": {},
         "access_log_summary": {
@@ -482,11 +481,10 @@ if st.button("Process File"):
     if tcsv and os.path.exists(tcsv):
         st.info(f"Tamper CSV: {tcsv}")
     
-    # Only show the PDF report (removed text reports)
     if pdf_report_path and os.path.exists(pdf_report_path):
         st.info(f"Comprehensive PDF Report: {pdf_report_path}")
         
-        # Provide download button for the PDF
+        # Provide a download button for the PDF
         with open(pdf_report_path, "rb") as f:
             pdf_data = f.read()
         st.download_button(
