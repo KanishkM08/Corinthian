@@ -4,7 +4,11 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 import uuid
+from datetime import datetime, timedelta
+import platform
 from datetime import datetime
+
+system_version = f"{platform.system()} {platform.release()}"
 
 # Ensure "src" is in sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -74,14 +78,29 @@ def get_file_others(file_type="cctv"):
 
 # Folder selection function (cross-platform)
 def select_output_folder():
-    import tkinter as tk
-    from tkinter import filedialog
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes('-topmost', True)
-    folder_path = filedialog.askdirectory(title="Select Output Folder")
-    root.destroy()
-    return folder_path
+    import platform
+    import subprocess
+
+    system = platform.system()
+    if system == "Darwin":  # macOS
+        script = '''
+        set chosenFolder to POSIX path of (choose folder with prompt "Select Output Folder")
+        return chosenFolder
+        '''
+        proc = subprocess.run(['osascript', '-e', script], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+        return None
+    else:  # Windows/Linux
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes('-topmost', True)
+        folder_path = filedialog.askdirectory(title="Select Output Folder")
+        root.destroy()
+        return folder_path
+
 
 st.title("Corinthian")
 
@@ -157,87 +176,84 @@ if st.session_state.excel_selected:
     st.info(f"Excel File: {st.session_state.excel_selected}")
 st.info(f"Output Folder: {st.session_state.output_folder}")
 
-# Detection options
+# ALWAYS display currently selected files BEFORE any st.stop() paths
 st.subheader("Detection Options")
 default_weights = os.path.join(current_dir, "..", "src", "yolov8n.pt")
-yolo_weights = st.text_input("YOLO weights path", value=os.path.abspath(default_weights))
+yolo_weights = st.text_input("YOLO weights path:", value=os.path.abspath(default_weights))
 conf = st.slider("YOLO confidence", min_value=0.1, max_value=0.9, value=0.5, step=0.05)
 
-# Performance controls
+# Detection options
 frame_skip = st.slider("Frame skip (process every Nth frame)", min_value=1, max_value=5, value=2, step=1)  # 1 = every frame
 imgsz = st.selectbox("YOLO input size (imgsz)", options=[480, 640, 720], index=1)
 tolerance = st.slider("Face match tolerance", min_value=0.3, max_value=0.8, value=0.5, step=0.05)
 
-# Process button
+# Performance controls
 if st.button("Process File"):
-    # Validate inputs
+    # Process button
     if not st.session_state.selected_file:
         st.error("Please select a CCTV file.")
         st.stop()
-
+    
     if not st.session_state.excel_selected:
         st.error("Please select the Excel file with references.")
         st.stop()
-
-    # Use the session state variables
+    
+    # Validate inputs
     output_folder = st.session_state.output_folder
     selected_file = st.session_state.selected_file
     excel_selected = st.session_state.excel_selected
-
+    
     if not os.path.exists(output_folder):
         try:
             os.makedirs(output_folder, exist_ok=True)
         except Exception as e:
             st.error(f"Cannot create output folder: {e}")
             st.stop()
-
-    # Verify selected file exists
+    
+    # Use the session state variables
     if not os.path.exists(selected_file):
         st.error(f"Selected file missing: {selected_file}")
         st.stop()
-
-    # Parse Excel references (supports either 'photo' or 'Photos/PhotoN' schema)
+    
+    # Verify selected file exists
+    image_dir = "db"  # Directory where reference images are stored
     parse_ok = True
     references = {}
+    
     try:
-        df = pd.read_excel(excel_selected, engine="openpyxl")
-        # Prefer a strict schema if provided: Name + photo (single file path per row)
-        if 'Name' in df.columns and 'photo' in df.columns:
+        df = pd.read_excel(excel_selected, engine='openpyxl')
+        
+        # Ensure required columns exist
+        if "ID" in df.columns and "Name" in df.columns:
             for _, row in df.iterrows():
-                name = str(row.get('Name', '')).strip()
-                photo_path = str(row.get('photo', '')).strip()
-                if name and photo_path and photo_path.lower() != 'nan' and os.path.exists(photo_path):
-                    references.setdefault(name, []).append(photo_path)
-        # Otherwise, allow Photos (comma-separated) or PhotoN columns
-        else:
-            for _, row in df.iterrows():
-                name = str(row.get('Name', '')).strip()
-                if not name:
+                person_id = str(row.get("ID", "")).strip()
+                name = str(row.get("Name", "")).strip()
+                
+                if not person_id or not name:
                     continue
+                
+                # Try to find image file in db directory
                 img_paths = []
-                if 'Photos' in df.columns and pd.notnull(row.get('Photos')):
-                    for p in str(row['Photos']).split(','):
-                        pth = p.strip()
-                        if pth and os.path.exists(pth):
-                            img_paths.append(pth)
-                for col in df.columns:
-                    if col.startswith('Photo') and pd.notnull(row.get(col)):
-                        pth = str(row[col]).strip()
-                        if pth and pth.lower() != 'nan' and os.path.exists(pth):
-                            img_paths.append(pth)
+                for ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+                    candidate = os.path.join(image_dir, person_id + ext)
+                    if os.path.exists(candidate):
+                        img_paths.append(candidate)
+                
                 if img_paths:
                     references[name] = img_paths
+        
         if not references:
-            st.warning("No valid reference images found in Excel. Please verify absolute file paths.")
+            st.warning("No valid reference images found in db/. Make sure IDs in Excel match filenames.")
+    
     except Exception as e:
         parse_ok = False
         st.error(f"Failed to parse Excel: {e}")
-
+    
     if not parse_ok:
         st.stop()
     else:
         st.success(f"Loaded references for {len(references)} people.")
-
+    
     # Log evidence metadata
     evidence_metadata = {}
     try:
@@ -246,13 +262,14 @@ if st.button("Process File"):
         st.json(metadata)
     except Exception as e:
         st.warning(f"Metadata logging failed: {e}")
-
+    
+    # Import the updated ai_detection module
     try:
         from src.ai_detection import run_ai_detection
     except ImportError:
-        st.error("Could not import ai_detection. Ensure ai_detection.py is alongside app.py and defines run_ai_detection.")
+        st.error("Could not import ai_detection. Ensure ai_detection.py is updated and available.")
         st.stop()
-
+    
     # Run AI Person Detection
     with st.spinner("Running AI person detection..."):
         try:
@@ -269,77 +286,100 @@ if st.button("Process File"):
             st.success("Person detection completed successfully!")
         except Exception as e:
             st.error(f"Person detection failed: {e}")
-            person_result = {"detections": {}, "output_video": None, "report_path": None}
-
+            person_result = {
+                "detections": {},
+                "avg_similarities": {},
+                "output_video": None,
+                "report_path": None
+            }
+    
     try:
         from src.tdetection import run_tamper_detection
     except ImportError:
         st.error("Could not import tdetection. Ensure tdetection.py is alongside app.py.")
         st.stop()
-
+    
     # Run Tamper Detection
     with st.spinner("Running tamper detection..."):
         try:
-            t_video, t_csv, tamper_times = run_tamper_detection(selected_file, output_folder)
+            tvideo, tcsv, tamper_times = run_tamper_detection(selected_file, output_folder)
             st.success("Tamper detection completed successfully!")
         except Exception as e:
             st.error(f"Tamper detection failed: {e}")
-            t_video, t_csv, tamper_times = None, None, []
-
+            tvideo, tcsv, tamper_times = None, None, []
+    
     # Generate comprehensive PDF report instead of text report
     pdf_report_path = os.path.join(output_folder, "forensic_analysis_report.pdf")
     
     # Prepare data for the PDF report
     report_data = {
-        "report_id": str(uuid.uuid4())[:8].upper(),
+        "report_id": str(uuid.uuid4()).upper(),
         "case_id": caseid,
         "investigator": iname,
-        "generating_system_version": "Corinthian v1.0",
-        "evidence_list": [
-            {
-                "filename": os.path.basename(selected_file),
-                "sha256": evidence_metadata.get('sha256', 'N/A'),
-                "ingest_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                "camera_id": "CCTV-1",
-                "duration": evidence_metadata.get('duration', 'N/A'),
-                "metadata": evidence_metadata
-            }
-        ],
+        "generating_system_version": system_version,
+        "evidence_list": [{
+            "filename": os.path.basename(selected_file),
+            "sha256": sha256 if 'sha256' in locals() else "N/A",
+            "ingest_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "camera_id": "CCTV-1",
+        }],
         "findings": [],
         "forensics": {
             "metadata_summary": evidence_metadata,
-            "tamper_flags": [{"time": str(timedelta(seconds=t)), "explanation": "Potential tampering detected"} for t in tamper_times] if tamper_times else [],
+            "tamper_flags": [{"time": str(timedelta(seconds=t)), "explanation": "Potential tampering detected"} 
+                           for t in tamper_times] if tamper_times else [],
             "deepfake_score": 0.15  # Placeholder - would need actual deepfake detection
         },
-        "signatures": {
-            "report_sha256": "N/A",  # Will be calculated by generate_report
-            "signature": "N/A",  # Placeholder for digital signature
-            "signing_cert_subject": "N/A",
-            "signing_cert_pubkey_fingerprint": "N/A"
-        },
+        "signatures": {},
         "access_log_summary": {
             "total_accesses": 1,
-            "first_access": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "last_access": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "first_access": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_access": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "users": [iname]
         }
     }
     
-    # Convert person detection results to findings format
-    for name, timestamps in person_result.get("detections", {}).items():
-        for ts in set(timestamps):
-            report_data["findings"].append({
-                "time_window": f"{ts} - {ts}",  # Simplified - would need actual time windows
-                "track_id": "N/A",  # Would need to extract from detection results
-                "object_type": "Person",
-                "representative_frame_path": "N/A",  # Would need to extract frames
-                "bounding_box": [0, 0, 0, 0],  # Placeholder
-                "matched_offender_id": name.split()[0] if ' ' in name else name,
-                "matched_offender_name": name,
-                "similarity_score": 0.85,  # Placeholder - would need actual similarity scoring
-                "verification_status": "unverified"  # Would need verification system
-            })
-    
+    # Convert person detection results to findings format using actual similarity scores
+    # for name, timestamps in person_result.get("detections", {}).items():
+    #     # Get the average similarity score for this person
+    #     avg_similarity = person_result.get("avg_similarities", {}).get(name, 0.0)
+        
+    #     for ts in set(timestamps):
+    #         report_data["findings"].append({
+    #             "time_window": f"{ts}",  # Simplified - would need actual time windows
+    #             "track_id": "N/A",  # Would need to extract from detection results
+    #             "object_type": "Person",
+    #             "representative_frame_path": "N/A",  # Would need to extract frames
+    #             "bounding_box": [0, 0, 0, 0],  # Placeholder
+    #             "matched_offender_id": name.split("(")[0] if "(" in name else name,
+    #             "matched_offender_name": name,
+    #             "similarity_score": avg_similarity / 100.0,  # Convert percentage to decimal for report
+    #             "verification_status": "unverified"  # Would need verification system
+    #         })
+    from collections import defaultdict
+
+    # Build a mapping of timestamp → list of similarity scores
+    scores_by_ts = defaultdict(list)
+    for name, timestamps in person_result["detections"].items():
+        sims = person_result["similarity_scores"].get(name, [])
+        for ts, sim in zip(timestamps, sims):
+            scores_by_ts[(name, ts)].append(sim)
+
+    # Now generate findings using the max similarity per detection
+    for (name, ts), sim_list in scores_by_ts.items():
+        max_sim = max(sim_list)  # best score for this timestamp/person
+        report_data["findings"].append({
+            "time_window": ts,
+            "track_id": "N/A",
+            "object_type": "Person",
+            "representative_frame_path": "N/A",
+            "bounding_box": [0, 0, 0, 0],
+            "matched_offender_id": name,
+            "matched_offender_name": name,
+            "similarity_score": max_sim / 100.0,  # decimal form
+            "verification_status": "unverified"
+        })
+
     # Generate the PDF report
     with st.spinner("Generating comprehensive PDF report..."):
         try:
@@ -348,21 +388,31 @@ if st.button("Process File"):
         except Exception as e:
             st.error(f"Failed to generate PDF report: {e}")
             pdf_report_path = None
-
+    
     # Display outputs and info
     st.caption(f"Used settings: frame_skip={frame_skip}, imgsz={imgsz}, tolerance={tolerance}, conf={conf}")
+    
     st.subheader("Analysis Results")
     col1, col2 = st.columns(2)
+    
     with col1:
-        st.write("Person Detection")
+        st.write("**Person Detection**")
         if person_result.get("output_video") and os.path.exists(person_result["output_video"]):
             st.info(f"Annotated video: {person_result['output_video']}")
+        
+        # Display detection results with similarity scores
+        if person_result.get("detections"):
+            st.write("**Detected Persons:**")
+            for name, timestamps in person_result["detections"].items():
+                st.write(f"- {name}: {len(timestamps)} detections")
+
+    
     with col2:
-        st.write("Tamper Detection")
-        if t_video and os.path.exists(t_video):
-            st.info(f"Tamper video: {t_video}")
-        if t_csv and os.path.exists(t_csv):
-            st.info(f"Tamper CSV: {t_csv}")
+        st.write("**Tamper Detection**")
+        if tvideo and os.path.exists(tvideo):
+            st.info(f"Tamper video: {tvideo}")
+        if tcsv and os.path.exists(tcsv):
+            st.info(f"Tamper CSV: {tcsv}")
     
     # Only show the PDF report (removed text reports)
     if pdf_report_path and os.path.exists(pdf_report_path):
