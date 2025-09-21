@@ -22,22 +22,6 @@ sys.path.insert(0, os.path.abspath(dashboard_dir))
 # Add current directory for local imports
 sys.path.insert(0, current_dir)
 
-# Imports with error handling
-try:
-    from src.metadata import log_evidence_from_path
-except ImportError:
-    st.error("Could not import src.metadata. Ensure src/metadata.py exists and path is correct.")
-    st.stop()
-
-# Import the PDF report generator
-try:
-    from generate_report import generate_report
-except ImportError:
-    st.error("Could not import generate_report. Ensure generate_report.py is alongside app.py.")
-    st.stop()
-
-# Import car detection
-from src.car_detection import run_car_detection
 
 
 # File selection functions
@@ -260,7 +244,8 @@ if st.button("Process File"):
         st.stop()
     else:
         st.success(f"Loaded references for {len(references)} people.")
-    
+    # Imports metadata
+    from src.metadata import log_evidence_from_path
     # Log evidence metadata
     evidence_metadata = {}
     try:
@@ -304,7 +289,8 @@ if st.button("Process File"):
                 "report_path": None,
                 "similarity_scores": {}
             }
-    
+    # Import car detection
+    from src.car_detection import run_car_detection
     # Run Car Detection automatically
     with st.spinner("Running car detection..."):
         try:
@@ -439,7 +425,8 @@ if st.button("Process File"):
             "detection_count": len(vehicle_info.get("detections", [])),
             "plates": vehicle_info.get("plates", [])
         })
-
+    # Import the PDF report generator
+    from generate_report import generate_report
     # Generate the PDF report
     with st.spinner("Generating comprehensive PDF report..."):
         try:
