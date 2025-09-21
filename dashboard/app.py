@@ -36,6 +36,11 @@ except ImportError:
     st.error("Could not import generate_report. Ensure generate_report.py is alongside app.py.")
     st.stop()
 
+# Import car detection
+
+from src.car_detection import run_car_detection
+
+
 # File selection functions
 def get_file_mac(file_type="cctv"):
     import subprocess
@@ -187,6 +192,9 @@ frame_skip = st.slider("Frame skip (process every Nth frame)", min_value=1, max_
 imgsz = st.selectbox("YOLO input size (imgsz)", options=[480, 640, 720], index=1)
 tolerance = st.slider("Face match tolerance", min_value=0.3, max_value=0.8, value=0.5, step=0.05)
 
+# Info message about car detection
+st.info("Car detection will run automatically alongside person detection.")
+
 # Performance controls
 if st.button("Process File"):
     # Process button
@@ -270,6 +278,10 @@ if st.button("Process File"):
         st.error("Could not import ai_detection. Ensure ai_detection.py is updated and available.")
         st.stop()
     
+    # Run both AI Person Detection and Car Detection
+    person_result = None
+    car_result = None
+    
     # Run AI Person Detection
     with st.spinner("Running AI person detection..."):
         try:
@@ -290,16 +302,40 @@ if st.button("Process File"):
                 "detections": {},
                 "avg_similarities": {},
                 "output_video": None,
-                "report_path": None
+                "report_path": None,
+                "similarity_scores": {}
             }
     
+    # Run Car Detection automatically
+    with st.spinner("Running car detection..."):
+        try:
+            car_result = run_car_detection(
+                input_video=selected_file,
+                output_dir=output_folder,
+                yolo_weights=yolo_weights,
+                conf=conf,
+                frame_skip=frame_skip,
+                imgsz=imgsz,
+            )
+            st.success("Car detection completed successfully!")
+        except Exception as e:
+            st.error(f"Car detection failed: {e}")
+            car_result = {
+                "total_vehicles": 0,
+                "vehicles_with_plates": 0,
+                "total_plates": 0,
+                "vehicle_detections": {},
+                "plate_detections": {},
+                "output_video": None
+            }
+    
+    # Run Tamper Detection
     try:
         from src.tdetection import run_tamper_detection
     except ImportError:
         st.error("Could not import tdetection. Ensure tdetection.py is alongside app.py.")
         st.stop()
     
-    # Run Tamper Detection
     with st.spinner("Running tamper detection..."):
         try:
             tvideo, tcsv, tamper_times = run_tamper_detection(selected_file, output_folder)
@@ -336,38 +372,25 @@ if st.button("Process File"):
             "first_access": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "last_access": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "users": [iname]
+        },
+        "car_detection": {
+            "total_vehicles": car_result["total_vehicles"],
+            "vehicles_with_plates": car_result["vehicles_with_plates"],
+            "total_plates": car_result["total_plates"],
+            "vehicle_details": []
         }
     }
     
     # Convert person detection results to findings format using actual similarity scores
-    # for name, timestamps in person_result.get("detections", {}).items():
-    #     # Get the average similarity score for this person
-    #     avg_similarity = person_result.get("avg_similarities", {}).get(name, 0.0)
-        
-    #     for ts in set(timestamps):
-    #         report_data["findings"].append({
-    #             "time_window": f"{ts}",  # Simplified - would need actual time windows
-    #             "track_id": "N/A",  # Would need to extract from detection results
-    #             "object_type": "Person",
-    #             "representative_frame_path": "N/A",  # Would need to extract frames
-    #             "bounding_box": [0, 0, 0, 0],  # Placeholder
-    #             "matched_offender_id": name.split("(")[0] if "(" in name else name,
-    #             "matched_offender_name": name,
-    #             "similarity_score": avg_similarity / 100.0,  # Convert percentage to decimal for report
-    #             "verification_status": "unverified"  # Would need verification system
-    #         })
     from collections import defaultdict
-
-    # Build a mapping of timestamp → list of similarity scores
     scores_by_ts = defaultdict(list)
-    for name, timestamps in person_result["detections"].items():
-        sims = person_result["similarity_scores"].get(name, [])
+    for name, timestamps in person_result.get("detections", {}).items():
+        sims = person_result.get("similarity_scores", {}).get(name, [])
         for ts, sim in zip(timestamps, sims):
             scores_by_ts[(name, ts)].append(sim)
-
-    # Now generate findings using the max similarity per detection
+    
     for (name, ts), sim_list in scores_by_ts.items():
-        max_sim = max(sim_list)  # best score for this timestamp/person
+        max_sim = max(sim_list) if sim_list else 0
         report_data["findings"].append({
             "time_window": ts,
             "track_id": "N/A",
@@ -376,8 +399,46 @@ if st.button("Process File"):
             "bounding_box": [0, 0, 0, 0],
             "matched_offender_id": name,
             "matched_offender_name": name,
-            "similarity_score": max_sim / 100.0,  # decimal form
+            "similarity_score": max_sim / 100.0,
             "verification_status": "unverified"
+        })
+    
+    # Add car detection results to findings
+    for track_id, vehicle_info in car_result.get("vehicle_detections", {}).items():
+        vehicle_type = vehicle_info.get("type", "unknown")
+        detection_times = vehicle_info.get("detections", [])
+        plates = vehicle_info.get("plates", [])
+        
+        # Create a finding for each unique detection time
+        for detection_time in set(detection_times):
+            plate_info = f"Plates: {', '.join(plates)}" if plates else "No plates detected"
+            
+            report_data["findings"].append({
+                "time_window": detection_time,
+                "track_id": str(track_id),
+                "object_type": vehicle_type,
+                "representative_frame_path": "N/A",
+                "bounding_box": [0, 0, 0, 0],
+                "matched_offender_id": f"Vehicle_{track_id}",
+                "matched_offender_name": f"{vehicle_type} ID:{track_id} ({plate_info})",
+                "similarity_score": 1.0 if plates else 0.5,  # Higher score if plates found
+                "verification_status": "verified" if plates else "unverified"
+            })
+    
+    # Add car detection results to separate car_detection section for detailed reporting
+    report_data["car_detection"] = {
+        "total_vehicles": car_result["total_vehicles"],
+        "vehicles_with_plates": car_result["vehicles_with_plates"],
+        "total_plates": car_result["total_plates"],
+        "vehicle_details": []
+    }
+    
+    for track_id, vehicle_info in car_result.get("vehicle_detections", {}).items():
+        report_data["car_detection"]["vehicle_details"].append({
+            "track_id": track_id,
+            "vehicle_type": vehicle_info.get("type", "unknown"),
+            "detection_count": len(vehicle_info.get("detections", [])),
+            "plates": vehicle_info.get("plates", [])
         })
 
     # Generate the PDF report
@@ -406,13 +467,20 @@ if st.button("Process File"):
             for name, timestamps in person_result["detections"].items():
                 st.write(f"- {name}: {len(timestamps)} detections")
 
-    
     with col2:
-        st.write("**Tamper Detection**")
-        if tvideo and os.path.exists(tvideo):
-            st.info(f"Tamper video: {tvideo}")
-        if tcsv and os.path.exists(tcsv):
-            st.info(f"Tamper CSV: {tcsv}")
+        st.write("**Car Detection**")
+        st.metric("Total Vehicles", car_result["total_vehicles"])
+        st.metric("Vehicles with Plates", car_result["vehicles_with_plates"])
+        st.metric("Total Plates Found", car_result["total_plates"])
+        
+        if car_result.get("output_video") and os.path.exists(car_result["output_video"]):
+            st.info(f"Annotated car video: {car_result['output_video']}")
+    
+    st.write("**Tamper Detection**")
+    if tvideo and os.path.exists(tvideo):
+        st.info(f"Tamper video: {tvideo}")
+    if tcsv and os.path.exists(tcsv):
+        st.info(f"Tamper CSV: {tcsv}")
     
     # Only show the PDF report (removed text reports)
     if pdf_report_path and os.path.exists(pdf_report_path):

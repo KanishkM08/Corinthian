@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.backends import default_backend
+from src.car_detection import run_car_detection
 
 
 def generate_self_signed_cert():
@@ -185,16 +186,24 @@ def generate_report(report_data: dict, output_path: str):
             offender_info = str(finding.get('matched_offender_id', 'N/A'))
             if finding.get('matched_offender_name'):
                 offender_info += f" ({finding.get('matched_offender_name')})"
-            
+
             # Truncate long offender info if needed
             if len(offender_info) > 25:
                 offender_info = offender_info[:22] + "..."
-                
+
+            # Format similarity score appropriately
+            similarity = finding.get('similarity_score', 0)
+            if finding.get('object_type') == 'Person':
+                similarity_str = f"{similarity*100:.1f}%" if similarity else 'N/A'
+            else:
+                # For vehicles, show a simplified score
+                similarity_str = "Plate Found" if similarity > 0.7 else "No Plate"
+
             findings_data.append([
                 str(finding.get('time_window', 'N/A')),
                 str(finding.get('object_type', 'N/A')),
                 offender_info,
-                f"{finding.get('similarity_score', 0)*100:.1f}%" if finding.get('similarity_score') else 'N/A',
+                similarity_str,
                 str(finding.get('verification_status', 'N/A'))
             ])
         
@@ -266,18 +275,18 @@ def generate_report(report_data: dict, output_path: str):
         story.append(safe_paragraph("No tampering detected", normal_style))
     story.append(Spacer(1, 6))
 
-    deepfake_score = forensics.get('deepfake_score')
-    if deepfake_score is not None:
-        story.append(safe_paragraph(f"Deepfake Detection Score: {deepfake_score*100:.1f}%", bold_style))
-        if deepfake_score > 0.7:
-            story.append(safe_paragraph("WARNING: High probability of deepfake manipulation", normal_style))
-        elif deepfake_score > 0.3:
-            story.append(safe_paragraph("Moderate probability of deepfake manipulation", normal_style))
-        else:
-            story.append(safe_paragraph("Low probability of deepfake manipulation", normal_style))
-    else:
-        story.append(safe_paragraph("Deepfake analysis not performed", normal_style))
-    story.append(Spacer(1, 12))
+    # deepfake_score = forensics.get('deepfake_score')
+    # if deepfake_score is not None:
+    #     story.append(safe_paragraph(f"Deepfake Detection Score: {deepfake_score*100:.1f}%", bold_style))
+    #     if deepfake_score > 0.7:
+    #         story.append(safe_paragraph("WARNING: High probability of deepfake manipulation", normal_style))
+    #     elif deepfake_score > 0.3:
+    #         story.append(safe_paragraph("Moderate probability of deepfake manipulation", normal_style))
+    #     else:
+    #         story.append(safe_paragraph("Low probability of deepfake manipulation", normal_style))
+    # else:
+    #     story.append(safe_paragraph("Deepfake analysis not performed", normal_style))
+    # story.append(Spacer(1, 12))
 
     # --- STEP 2: Build preliminary PDF to compute hash ---
     # Create a temporary story for hash calculation (without signatures)
