@@ -129,8 +129,9 @@ python -c "import torch, tensorflow, cv2, face_recognition; print('All good')"
 
 If no errors → you’re set!
 
+Initial runs will take time.
 
-Windows
+** Windows **
 Open PowerShell as Administrator and run:
     winget install Python.Python.3.11
 
@@ -173,7 +174,7 @@ Inside your venv
     pip install --upgrade pip setuptools wheel
     pip install -r requirements.txt
 
-
+Initial runs will take time.
 
 Criminal Database creation:
 There is a sample Excel file in the db folder to create the database. The database(excel) should be in the db folder only.
