@@ -195,16 +195,3 @@ def run_car_detection(
         "width": int(width),
         "height": int(height),
     }
-
-# # === MAIN PROCESSING FUNCTION (for standalone use) ===
-
-# def process_video(
-#     video_path,
-#     output_txt,
-#     save_dir=None,
-#     frame_skip=1,
-#     model_path='yolov8n.pt',
-#     annotated_video_path=None,
-#     resize_width=960
-# ):
-#     """Process the video with YOLOv8 + BYTETrack for unique vehicle + plate logging."""
