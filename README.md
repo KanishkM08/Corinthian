@@ -129,6 +129,9 @@ python -c "import torch, tensorflow, cv2, face_recognition; print('All good')"
 
 If no errors → you’re set!
 
+**Run:**
+In the virtual environment, run:
+```streamlit run dashboard/app.py```
 Initial runs will take time.
 
 ** Windows **
@@ -174,6 +177,9 @@ Inside your venv
     pip install --upgrade pip setuptools wheel
     pip install -r requirements.txt
 
+**Run:**
+In the virtual environment, run:
+```streamlit run dashboard/app.py```
 Initial runs will take time.
 
 Criminal Database creation:
