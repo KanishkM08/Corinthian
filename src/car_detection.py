@@ -122,6 +122,9 @@ def run_car_detection(
     plate_detections = {}
     frame_idx = 0
     
+    # Track last seen frame for each vehicle to avoid duplicate logging
+    last_seen_frames = {}
+    
     try:
         while True:
             ret, frame = cap.read()
@@ -139,7 +142,7 @@ def run_car_detection(
                     cv2.putText(frame, f"{vehicle_type} ID:{track_id}",
                                 (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
                     
-                    # Log vehicle detection
+                    # Log vehicle detection - only if we haven't seen this vehicle recently
                     ts = _format_ts(frame_idx / max(fps, 1.0))
                     if track_id not in vehicle_detections:
                         vehicle_detections[track_id] = {
@@ -147,7 +150,15 @@ def run_car_detection(
                             'detections': [],
                             'plates': []
                         }
-                    vehicle_detections[track_id]['detections'].append(ts)
+                        # First sighting - always log
+                        vehicle_detections[track_id]['detections'].append(ts)
+                        last_seen_frames[track_id] = frame_idx
+                    else:
+                        # Only log if we haven't seen this vehicle in the last 30 frames
+                        # This prevents duplicate timestamps for the same continuous sighting
+                        if frame_idx - last_seen_frames.get(track_id, 0) > 30:
+                            vehicle_detections[track_id]['detections'].append(ts)
+                            last_seen_frames[track_id] = frame_idx
                     
                     # License plate detection + recognition
                     plates = detect_and_recognize_plates(frame, reader)
@@ -155,13 +166,17 @@ def run_car_detection(
                         if track_id not in plate_detections:
                             plate_detections[track_id] = []
                         
-                        if plate not in [p['plate'] for p in plate_detections[track_id]]:
+                        # Only add unique plates
+                        existing_plates = [p['plate'] for p in plate_detections[track_id]]
+                        if plate not in existing_plates:
                             plate_detections[track_id].append({
                                 'plate': plate,
                                 'timestamp': ts,
                                 'position': (px, py, pw, ph)
                             })
-                            vehicle_detections[track_id]['plates'].append(plate)
+                            # Add to vehicle's plate list (unique only)
+                            if plate not in vehicle_detections[track_id]['plates']:
+                                vehicle_detections[track_id]['plates'].append(plate)
                         
                         cv2.rectangle(frame, (px, py), (px+pw, py+ph), (0,0,255), 2)
                         cv2.putText(frame, plate, (px, py-10),
