@@ -395,33 +395,43 @@ if st.button("Process File"):
                 "verification_status": "unverified"
             })
     
-    # Car findings
+    # Car findings - Only first sighting per vehicle
     if run_car and car_result:
+        processed_vehicles = set()  # Track vehicles we've already added
+        
         for track_id, vehicle_info in car_result.get("vehicle_detections", {}).items():
             vehicle_type = vehicle_info.get("type", "unknown")
             detection_times = vehicle_info.get("detections", [])
             plates = vehicle_info.get("plates", [])
             
-            for detection_time in set(detection_times):
-                plate_info = f"Plates: {', '.join(plates)}" if plates else "No plates detected"
-                report_data["findings"].append({
-                    "time_window": detection_time,
-                    "track_id": str(track_id),
-                    "object_type": vehicle_type,
-                    "representative_frame_path": "N/A",
-                    "bounding_box": [0, 0, 0, 0],
-                    "matched_offender_id": f"Vehicle_{track_id}",
-                    "matched_offender_name": f"{vehicle_type} ID:{track_id} ({plate_info})",
-                    "similarity_score": 1.0 if plates else 0.5,
-                    "verification_status": "verified" if plates else "unverified"
-                })
+            # Only use the FIRST detection time
+            if detection_times:
+                first_detection_time = detection_times[0]  # First sighting
+                
+                # Only add each vehicle once
+                vehicle_key = f"{vehicle_type}_{track_id}"
+                if vehicle_key not in processed_vehicles:
+                    processed_vehicles.add(vehicle_key)
+                    
+                    plate_info = f"Plates: {', '.join(set(plates))}" if plates else "No plates detected"
+                    report_data["findings"].append({
+                        "time_window": first_detection_time,
+                        "track_id": str(track_id),
+                        "object_type": vehicle_type,
+                        "representative_frame_path": "N/A",
+                        "bounding_box": [0, 0, 0, 0],
+                        "matched_offender_id": f"Vehicle_{track_id}",
+                        "matched_offender_name": f"{vehicle_type} ID:{track_id} ({plate_info})",
+                        "similarity_score": 1.0 if plates else 0.5,
+                        "verification_status": "verified" if plates else "unverified"
+                    })
         
         report_data["car_detection"]["vehicle_details"] = [
             {
                 "track_id": track_id,
                 "vehicle_type": vehicle_info.get("type", "unknown"),
                 "detection_count": len(vehicle_info.get("detections", [])),
-                "plates": vehicle_info.get("plates", [])
+                "plates": list(set(vehicle_info.get("plates", [])))  # Unique plates only
             }
             for track_id, vehicle_info in car_result.get("vehicle_detections", {}).items()
         ]
