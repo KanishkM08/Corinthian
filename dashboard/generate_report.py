@@ -189,18 +189,42 @@ def generate_report(report_data: dict, output_path: str):
     findings = report_data.get('findings', [])
     if findings:
         findings_data = [["Time", "Object", "Matched ID", "Score", "Status"]]
-        for finding in findings:
+        
+        # Separate vehicles and persons for better organization
+        vehicle_findings = [f for f in findings if f.get('object_type') != 'Person']
+        person_findings = [f for f in findings if f.get('object_type') == 'Person']
+        
+        # Add vehicle findings first
+        for finding in vehicle_findings:
             time_window = str(finding.get('time_window', 'N/A'))
             object_type = str(finding.get('object_type', 'N/A'))
             offender_id = str(finding.get('matched_offender_id', 'N/A'))
             status = str(finding.get('verification_status', 'N/A'))
             
-            # Format similarity score
+            # Format similarity score for vehicles
             similarity = finding.get('similarity_score', 0)
-            if finding.get('object_type') == 'Person':
-                score_str = f"{similarity*100:.1f}%" if similarity else 'N/A'
-            else:
-                score_str = "Plate" if similarity > 0.7 else "No Plate"
+            score_str = "Plate" if similarity > 0.7 else "No Plate"
+
+            # Truncate long values
+            if len(time_window) > 10:
+                time_window = time_window[:8] + "..."
+            if len(offender_id) > 12:
+                offender_id = offender_id[:9] + "..."
+            if len(object_type) > 8:
+                object_type = object_type[:6] + "..."
+                
+            findings_data.append([time_window, object_type, offender_id, score_str, status])
+        
+        # Add person findings
+        for finding in person_findings:
+            time_window = str(finding.get('time_window', 'N/A'))
+            object_type = str(finding.get('object_type', 'N/A'))
+            offender_id = str(finding.get('matched_offender_id', 'N/A'))
+            status = str(finding.get('verification_status', 'N/A'))
+            
+            # Format similarity score for persons
+            similarity = finding.get('similarity_score', 0)
+            score_str = f"{similarity*100:.1f}%" if similarity else 'N/A'
 
             # Truncate long values
             if len(time_window) > 10:
